@@ -1,5 +1,5 @@
-# Builds and evaluates the SkillBot skills explorer; publishes it as a (private) static Hugging Face Space
-# once an HF_TOKEN secret exists in this repository.
+# Builds and evaluates the SkillBot skills explorer and publishes it as a public static Hugging Face Space
+# (public since Malav approved it on 21 Oct 2026). Needs the HF_TOKEN secret.
 name: Skills explorer
 on: workflow_dispatch
 jobs:
@@ -26,4 +26,5 @@ jobs:
           api.create_repo(s, repo_type="space", space_sdk="static", private=True, exist_ok=True)
           api.upload_folder(repo_id=s, repo_type="space", folder_path=".",
                             allow_patterns=["index.html", "README.md", "jobs.min.json", "embeddings.bin", "eval.json"])
-          print("https://huggingface.co/spaces/" + s)
+          api.update_repo_settings(s, repo_type="space", private=False)
+          print("https://huggingface.co/spaces/" + s, "private =", api.repo_info(s, repo_type="space").private)
