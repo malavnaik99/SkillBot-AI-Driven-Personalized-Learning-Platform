@@ -23,7 +23,7 @@
 <body>
 <main>
   <h1>SkillBot skills explorer</h1>
-  <p class="note">Type a job title and see the skills that the most similar real job ads ask for. It matches job titles by meaning,
+  <p class="note">Type a job title and see the skills that the most similar real job ads, and their job area, ask for. It matches job titles by meaning,
     so "data wrangler" can still find data analyst ads. Runs in your browser: nothing you type is sent anywhere.
     Part of <a href="https://malavnaik99.github.io">Malav Naik</a>'s MSc project, SkillBot.</p>
   <form id="f">
@@ -45,18 +45,23 @@
 </main>
 <script type="module">
 import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2";
-const $ = id => document.getElementById(id), DIM = 384, K = 5;
+const $ = id => document.getElementById(id), DIM = 384;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-let jobs, vecs, embed;
+const add = (m, k, w) => m.set(k, (m.get(k) || 0) + w), top = (m, n) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n);
+let jobs, vecs, embed, cfg, shares = new Map();
 try {
-  [jobs, vecs, embed] = await Promise.all([
+  [jobs, vecs, embed, cfg] = await Promise.all([
     fetch("jobs.min.json").then(r => r.json()),
     fetch("embeddings.bin").then(r => r.arrayBuffer()).then(b => new Float32Array(b)),
     pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", { dtype: "q8" }),
+    fetch("eval.json").then(r => r.json()),
   ]);
+  // Share of ads in each job area that list each skill (the "area" part of the method).
+  const sizes = new Map();
+  for (const [, c, sk] of jobs) { add(sizes, c, 1); if (!shares.has(c)) shares.set(c, new Map()); for (const s of sk) add(shares.get(c), s, 1); }
+  for (const [c, m] of shares) for (const [s, n] of m) m.set(s, n / sizes.get(c));
   $("n").textContent = jobs.length.toLocaleString("en");
-  fetch("eval.json").then(r => r.json()).then(e => $("score").textContent =
-    `In a test that hid each ad and predicted its skills from the 5 most similar other ads, ${Math.round(e.similar.precision_at_10 * 100)}% of the top 10 suggested skills were in the real ad.`).catch(() => {});
+  $("score").textContent = `In a test that hid each ad and suggested 10 skills from its title alone, ${Math.round(cfg.demo.precision_at_10 * 100)}% of the suggestions were in the real ad.`;
   $("go").textContent = "Show skills"; $("go").disabled = false;
 } catch (e) {
   $("go").textContent = "Could not load"; $("out").textContent = "⚠️ " + (e && e.message ? e.message : e);
@@ -64,19 +69,22 @@ try {
 document.querySelectorAll(".examples button").forEach(b => b.onclick = () => { $("q").value = b.textContent; show(); });
 $("f").onsubmit = e => { e.preventDefault(); show(); };
 
+// Same method as the evaluation in embed.mjs: skills of the K most similar ads, plus the skills typical of their main job area.
 async function show() {
   const q = $("q").value.trim().slice(0, 120);
   if (!q || !embed) return;
-  const v = (await embed(q, { pooling: "mean", normalize: true })).data;
+  const { k, w } = cfg.demo, v = (await embed(q, { pooling: "mean", normalize: true })).data;
   const near = jobs.map((j, i) => { let s = 0; for (let d = 0; d < DIM; d++) s += v[d] * vecs[i * DIM + d]; return [s, j]; })
-    .sort((a, b) => b[0] - a[0]).slice(0, K);
-  const count = new Map();
-  for (const [, j] of near) for (const s of j[2]) count.set(s, (count.get(s) || 0) + 1);
-  const top = [...count].sort((a, b) => b[1] - a[1]).slice(0, 10);
+    .sort((a, b) => b[0] - a[0]).slice(0, k);
+  const score = new Map(), seen = new Map(), votes = new Map();
+  for (const [, j] of near) { add(votes, j[1], 1); for (const s of j[2]) { add(score, s, 1 / k); add(seen, s, 1); } }
+  const area = top(votes, 1)[0][0];
+  if (w > 0) for (const [s, x] of shares.get(area)) add(score, s, w * x);
+  const skills = top(score, 10).map(([s]) => s);
   $("out").innerHTML = `<h2>Skills most often asked for</h2>
-    <ul class="chips">${top.map(([s, n]) => `<li>${esc(s)} <span class="muted">${n}/${K}</span></li>`).join("")}</ul>
-    <p class="muted">Based on these ${K} similar job ads (area in brackets):</p>
-    <ul>${near.map(([, j]) => `<li>${esc(j[0])} <span class="muted">(${esc(j[1])})</span></li>`).join("")}</ul>`;
+    <ul class="chips">${skills.map(s => `<li>${esc(s)} <span class="muted">${seen.get(s) || 0}/${k}</span></li>`).join("")}</ul>
+    <p class="muted">The number shows in how many of the ${k} most similar ads the skill appears. Main job area: ${esc(area)}. The 5 closest ads:</p>
+    <ul>${near.slice(0, 5).map(([, j]) => `<li>${esc(j[0])} <span class="muted">(${esc(j[1])})</span></li>`).join("")}</ul>`;
 }
 </script>
 </body>
