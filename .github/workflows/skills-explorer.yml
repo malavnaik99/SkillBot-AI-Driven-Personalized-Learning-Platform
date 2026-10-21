@@ -1,0 +1,29 @@
+# Builds and evaluates the SkillBot skills explorer; publishes it as a (private) static Hugging Face Space
+# once an HF_TOKEN secret exists in this repository.
+name: Skills explorer
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+    defaults:
+      run: { working-directory: skills-explorer }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: pip install -q pandas pyarrow huggingface_hub && python prep.py
+      - run: npm install --silent @huggingface/transformers@3.0.2 && node embed.mjs
+      - if: env.HF_TOKEN != ''
+        shell: python
+        run: |
+          from huggingface_hub import HfApi
+          api, s = HfApi(), "Malavnaik/skillbot-skills-explorer"
+          api.create_repo(s, repo_type="space", space_sdk="static", private=True, exist_ok=True)
+          api.upload_folder(repo_id=s, repo_type="space", folder_path=".",
+                            allow_patterns=["index.html", "README.md", "jobs.min.json", "embeddings.bin", "eval.json"])
+          print("https://huggingface.co/spaces/" + s)

@@ -1,0 +1,6 @@
+node_modules/
+skills-explorer/jobs*.json
+skills-explorer/embeddings.bin
+skills-explorer/eval.json
+skills-explorer/package*.json
+__pycache__/
